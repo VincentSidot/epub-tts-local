@@ -73,7 +73,7 @@ You can found some example EPUB files online or create your own. For example, yo
 
 2. Run the script with the EPUB file:
 ```bash
-python script.py path/to/your/book.epub -v 0.8 -s 1.0
+python epub.py path/to/your/book.epub -v 0.8 -s 1.0
 ```
 
 ## License
