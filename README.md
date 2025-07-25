@@ -47,6 +47,7 @@ source .venv/bin/activate # Activate the virtual environment (Linux/Mac)
 3. Install the required packages:
 
 ```bash
+cd chatterbox && pip install . && cd ..
 pip install -r requirements.txt
 ```
 
