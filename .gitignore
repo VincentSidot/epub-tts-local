@@ -16,3 +16,7 @@ __pycache__/
 *.pdf
 *.wav
 *.mp3
+*.txt
+
+# But keep requirements.txt
+!requirements.txt

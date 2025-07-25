@@ -12,7 +12,7 @@ from prompt_toolkit.completion import WordCompleter
 console = Console()
 chat_history: List[Dict[str, str]] = []
 commands: Dict[str, Dict[str, Callable[[List[str]], bool]]] = {}
-model_name: str = "gemma3n:e4b"
+model_name: str = "gemma3:27b"
 client: Client = None
 system_prompt = "You are a helpful assistant."  # default system prompt
 
@@ -142,7 +142,7 @@ def chat_loop():
 # === CLI Argument Parser ===
 def parse_args():
     parser = argparse.ArgumentParser(description="Ollama Chat CLI")
-    parser.add_argument("--model", "-m", default="gemma3n:e4b", help="Model to use")
+    parser.add_argument("--model", "-m", default=model_name, help="Model to use")
     parser.add_argument("--host", default="http://localhost:11434", help="Ollama host")
     return parser.parse_args()
 

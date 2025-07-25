@@ -1,3 +1,5 @@
+import sys
+
 from ebooklib import epub
 from bs4 import BeautifulSoup
 from typing import Generator
@@ -18,16 +20,19 @@ def epub_text_generator(file_path: str) -> Generator[str, None, None]:
                     yield text
 
 
-path = "leo-tolstoy_resurrection.epub"
+if len(sys.argv) != 2:
+    print(f"Usage: python {sys.argv[0]} <epub_file>")
+
+path = sys.argv[1]
 
 for i, text_block in enumerate(epub_text_generator(path)):
     print(
-        f"Text block {i}: {text_block[:10]}..."
+        f"Text block {i}: {text_block[:80]}..."
     )  # Print first 10 characters of each block
-    if i >= 10:  # Limit to first 10 blocks for brevity
+    if i >= 25:  # Limit to first 10 blocks for brevity
         break
 
-book = epub.read_epub("leo-tolstoy_resurrection.epub")
+book = epub.read_epub(path)
 
 for item in book.get_items():
     print(

@@ -1,6 +1,7 @@
 import queue
 import threading
 import sounddevice as sd
+import soundfile as sf
 import logging
 from typing import Generator
 import torchaudio.transforms as ta
@@ -21,6 +22,9 @@ class AudioPlayer:
         target_punctuation_stop: Optional[List[str]] = None,
         target_token_length: int = 64,
         playback_blocksize: int = 640,
+        queue_maxsize: int = 10,
+        device: Optional[str] = None,  # Force the device
+        voice_clone: Optional[str] = None,  # Optional voice clone for text generation
     ) -> None:
         """
         Initialize the AudioPlayer with a pre-trained model.
@@ -30,24 +34,28 @@ class AudioPlayer:
             target_punctuation_stop (Optional[List[str]]): List of punctuation marks to stop at when chunking text.
             target_token_length (int): Target length for each text chunk in tokens.
             playback_blocksize (int): Size of the audio buffer for playback.
+            queue_size (int): Maximum size of the queue before generation pause
         """
         # Automatically detect the best available device
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif torch.backends.mps.is_available():
-            device = "mps"
-        else:
-            device = "cpu"
+        if device is None:
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif torch.backends.mps.is_available():
+                device = "mps"
+            else:
+                device = "cpu"
 
         logging.info(f"Using device: {device}")
 
+        self.__device = device
         self.__model = ChatterboxTTS.from_pretrained(device=device)
-        self.__queue = queue.Queue()
+        self.__queue = queue.Queue(queue_maxsize)
         self.__stop_signal = object()
         self.__TARGET_TOKEN_LENGTH = target_token_length
         self.__PLAYBACK_BLOCKSIZE = playback_blocksize
         self.__volume = volume
         self.__previous_audio: Optional[Tensor] = None
+        self.__voice_clone = voice_clone
 
         self.__orig_sr = self.__model.sr
         self.__target_sr = int(self.__orig_sr * sampling_rate_ratio)
@@ -64,21 +72,36 @@ class AudioPlayer:
         else:
             self.__TARGET_PUNCTUATION_STOP = target_punctuation_stop
 
+    @property
+    def device(self) -> str:
+        return self.__device
+
     def torch_compile(self) -> None:
         """
         Compile the model using torch.compile for performance optimization.
         This is optional and can be skipped if not needed.
         """
         try:
+
+            if self.__device == "cuda":
+                backend = "cudagraphs"
+            else:
+                backend = "inductor"
+
             self.__model.t3._step_compilation_target = torch.compile(
                 self.__model.t3._step_compilation_target,
                 fullgraph=True,
-                backend="cudagraphs",
+                backend=backend,
             )
             self.__model.t3.init_patched_model()  # Initialize the patched model
             logging.info("Model compiled successfully.")
         except ImportError:
             logging.warning("torch.compile is not available. Skipping compilation.")
+
+    def change_model_encoding(self, dtype):
+        logging.info(f"")
+        self.__model.t3.to(dtype=dtype)
+        self.__model.conds.t3.to(dtype=dtype)
 
     def __cleanup(self, text: str) -> str:
         """
@@ -176,8 +199,8 @@ class AudioPlayer:
             audio_data_tensor = self.__queue.get()
             if audio_data_tensor is self.__stop_signal:
                 if buffer_size > 0:
-                    buffer[buffer_size:] = [0] * (
-                        chunk_size - buffer_size
+                    buffer[buffer_size:] = np.zeros(
+                        (chunk_size - buffer_size, 1)
                     )  # Fill the rest of the buffer with silence
                     yield buffer
                 yield self.__stop_signal
@@ -208,6 +231,61 @@ class AudioPlayer:
                     end_size -= chunk_size
                 buffer[:end_size] = audio_data[idx : idx + end_size]
                 buffer_size = end_size
+
+    def __generate(self, chunck_text: str) -> Tensor:
+        output = self.__model.generate(
+            chunck_text, audio_prompt_path=self.__voice_clone
+        )
+
+        # If output is generator consume it
+        if isinstance(output, Generator):
+            data = []
+            for chunk in output:
+                if not isinstance(chunk, Tensor):
+                    raise ValueError("Output must be a generator or tensor")
+                data.append(chunk)
+
+            return torch.cat(data, dim=-1)
+
+        # Else if output is tensor
+        elif isinstance(output, Tensor):
+            return output
+        else:
+            raise ValueError(
+                "Output must be a generator or tensor or generator of tensors"
+            )
+
+    def stream_to_file(
+        self, text_generator: Generator[str, None, None], file_path: str
+    ) -> None:
+
+        def writer_worker():
+            with sf.SoundFile(
+                file_path,
+                mode="w",
+                samplerate=self.__target_sr,
+                channels=1,
+                subtype="PCM_16",  # 16-bit PCM WAV
+            ) as file:
+                for audio_data in self.__data_stream(self.__PLAYBACK_BLOCKSIZE):
+                    if audio_data is self.__stop_signal:
+                        break  # stop signal received
+
+                    assert audio_data.shape[1] == 1, "Audio data must be mono"
+                    file.write(audio_data)
+
+        writer_thread = threading.Thread(target=writer_worker)
+        writer_thread.start()
+
+        for chunk in self.__chunk_text(text_generator):
+            audio_chunk = self.__generate(chunk)
+            self.__queue.put(audio_chunk)
+            logging.info(f"Processed text chunk: {chunk}")
+
+        self.__queue.put(self.__stop_signal)
+        writer_thread.join()
+
+        logging.info("Writing complete.")
 
     def stream(self, text_generator: Generator[str, None, None]) -> None:
 
@@ -243,10 +321,9 @@ class AudioPlayer:
             blocksize=self.__PLAYBACK_BLOCKSIZE,
         ):
             for chunk in self.__chunk_text(text_generator):
-                for audio_chunk in self.__model.generate(chunk):
-                    logging.info(f"Processed text chunk: {chunk}")
-
-                    self.__queue.put(audio_chunk)
+                audio_chunk = self.__generate(chunk)
+                self.__queue.put(audio_chunk)
+                logging.info(f"Processed text chunk: {chunk}")
             self.__queue.put(self.__stop_signal)
             event.wait()  # Wait for the stream to finish
 
