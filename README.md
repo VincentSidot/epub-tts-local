@@ -57,10 +57,13 @@ To use the script, run it from the command line, providing the path to an EPUB f
 python script.py path/to/your/book.epub -v 0.75 -s 0.95
 ```
 
-Argument	Description	Default
-file_path	Path to the EPUB file to read text from.	
--v, --volume	Volume level for audio playback (0.0 to 1.0).	0.5
--s, --sampling-rate-ratio	Ratio to adjust the sampling rate of the audio playback.	1.0 (currently used in the script, but not working as intended :sad:)
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `file_path` | Path to the EPUB file to read text from. | **REQUIRED** |
+| `-v`, `--volume` | Volume level for audio playback (0.0 to 1.0). | 0.5 |
+| `-s`, `--sampling-rate-ratio` | Ratio to adjust the sampling rate of the audio playback. | 1.0 (currently used in the script, but not working as intended :sad:) |
+| `-h`, `--help` | Show help message and exit. | - |
+
 
 ## Example
 
